@@ -1,8 +1,11 @@
 #include "comm.hpp"
+#include "ThreadPool/ThreadPool.h"
 
 #include <locale>
 #include <iostream>
 #include <vector>
+#include <algorithm>
+#include <sstream>
 
 #ifdef _WIN32
     #include <windows.h>
@@ -38,12 +41,13 @@ void OutputData(std::vector<Point>& parr) {
         std::cout << pi.x_ << ' ' << pi.y_ << ' ' << pi.z_ << std::endl;
 }
 
-bool bf_check(const Point &p, const std::vector<Point>& parr, const double &rc) {
+Point bf_check(const Point &p, const std::vector<Point>& parr, const double &rc) {
     for (const auto& pi : parr) {
-        if (DistCal(p, pi) < rc)
-            return true;
+        if (fcmp(rc, DistCal(p, pi)) >= 0) {
+            return p;
+        }
     }
-    return false;
+    return NULL_POINT;
 }
 
 int main() {
@@ -54,35 +58,47 @@ int main() {
     InputData(n, rc, x_lim, y_lim, z_lim, p_real, 1);
     std::vector<Point> p_mirror;
     p_mirror.reserve(n / 8);
+
+    ThreadPool pool(8);
+    std::vector< std::future<Point> > results;
     for (int i = 0; i < n; ++i) {
         for (int mask = 1; mask < 8; ++mask) {
-            Point tp = p_real[i];
-            if (mask & 1) {
-                if (tp.x_ * 2 < x_lim) {
-                    tp.x_ = 2 * x_lim - tp.x_;
-                } else {
-                    tp.x_ = -tp.x_;
-                }
-            }
-            if (mask >> 1 & 1) {
-                if (tp.y_ * 2 < y_lim) {
-                    tp.y_ = 2 * y_lim - tp.y_;
-                } else {
-                    tp.y_ = -tp.y_;
-                }
-            }
-            if (mask >> 2 & 1) {
-                if (tp.z_ * 2 < z_lim) {
-                    tp.z_ = 2 * z_lim - tp.z_;
-                } else {
-                    tp.z_ = -tp.z_;
-                }
-            }
-            if (bf_check(tp, p_real, rc)) {
-                p_mirror.emplace_back(tp);
-            }
+           results.emplace_back(
+                pool.enqueue(
+                    [&, i, mask](){
+                        Point tp = p_real[i];
+                        
+                        // std::stringstream ss;
+                        // ss << i << " : " << tp.x_ << ' ' << tp.y_ << ' ' << tp.z_ << std::endl;
+                        // std::cerr << ss.str() ;
+ 
+                        if (mask & 1) {
+                            tp.x_ = (tp.x_ * 2 < x_lim) ? tp.x_ + x_lim : tp.x_ - x_lim;
+                        }
+                        if (mask >> 1 & 1) {
+                            tp.y_ = (tp.y_ * 2 < y_lim) ? tp.y_ + y_lim : tp.y_ - y_lim;
+                        }
+                        if (mask >> 2 & 1) {
+                            tp.z_ = (tp.z_ * 2 < z_lim) ? tp.z_ + z_lim : tp.z_ - z_lim;
+                        }
+                        return bf_check(tp, p_real, rc);
+                    }
+                )
+            );
         }
     }
+
+    for (auto &&result : results) {
+        Point p = result.get();
+        if (p == NULL_POINT) continue;
+        p_mirror.emplace_back(p);
+    }
+    
+    // unique
+    std::sort(p_mirror.begin(), p_mirror.end());
+    p_mirror.erase(std::unique(p_mirror.begin(), p_mirror.end()), p_mirror.end());
+
     OutputData(p_mirror);
+    system("pause");
     return 0;
 }
